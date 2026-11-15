@@ -74,6 +74,7 @@ You will need your Discord server ID and role IDs.
 4. Save the configuration.
 
 The plugin restarts its Discord client when configuration changes are saved.
+The Discord Auth settings page is also available from the dashboard sidebar under `Plugins`.
 
 ## 6. Test Login Flow
 
@@ -90,8 +91,18 @@ Behavior during login:
 - If the user only has `@everyone` (no other roles), login is denied.
 - New Jellyfin users are auto-created.
 - Existing linked users are updated and role/library access is synchronized.
+- Existing Jellyfin accounts must be linked from their Profile page; Discord usernames are not used to match accounts.
 
-## 7. How Role Sync Works
+## 7. Link an Existing Jellyfin Account
+
+1. Sign in to Jellyfin with the account you want to link.
+2. Open that account's `Profile` page and select `Link Discord`.
+3. Authorize the Discord account. The existing Jellyfin account and sign-in method are kept.
+4. To remove the association, return to `Profile` and select `Unlink Discord`.
+
+An account created through Discord must have another sign-in method before it can be unlinked. Unlinking stops future Discord role synchronization but leaves the user's current Jellyfin permissions unchanged.
+
+## 8. How Role Sync Works
 
 - On Discord member role changes, Jellyfin permissions are updated.
 - If `Admin Role` matches, Jellyfin admin permissions are enabled.

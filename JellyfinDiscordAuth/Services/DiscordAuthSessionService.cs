@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -16,6 +17,7 @@ namespace JellyfinDiscordAuth.Services
     {
         private readonly ILogger<DiscordAuthSessionService> _logger;
         private readonly ConcurrentDictionary<string, DiscordAuthSession> _sessions = new();
+        private readonly ConcurrentDictionary<string, AccountLinkSession> _accountLinkSessions = new();
         private Timer? _cleanupTimer;
 
         /// <summary>
@@ -51,6 +53,38 @@ namespace JellyfinDiscordAuth.Services
             _sessions.TryAdd(code, session);
             _logger.LogInformation("Created Discord auth session for user {Username} ({UserId}).", username, userId);
             return code;
+        }
+
+        /// <summary>
+        /// Creates a short-lived state value for linking a Discord account to a Jellyfin user.
+        /// </summary>
+        /// <param name="userId">The Jellyfin user id.</param>
+        /// <returns>The one-time state value.</returns>
+        public string CreateAccountLinkSession(Guid userId)
+        {
+            string state;
+            do
+            {
+                state = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+            }
+            while (!_accountLinkSessions.TryAdd(state, new AccountLinkSession(userId, DateTimeOffset.UtcNow.AddMinutes(10))));
+
+            return state;
+        }
+
+        /// <summary>
+        /// Retrieves and removes the Jellyfin user id associated with an account-link state.
+        /// </summary>
+        /// <param name="state">The one-time state value.</param>
+        /// <returns>The user id, or null if the state is missing or expired.</returns>
+        public Guid? RetrieveAndRemoveAccountLinkSession(string state)
+        {
+            if (!_accountLinkSessions.TryRemove(state, out var session) || session.ExpiresAt < DateTimeOffset.UtcNow)
+            {
+                return null;
+            }
+
+            return session.UserId;
         }
 
         /// <summary>
@@ -90,9 +124,24 @@ namespace JellyfinDiscordAuth.Services
                 _sessions.TryRemove(key, out _);
             }
 
+            var expiredAccountLinkKeys = _accountLinkSessions
+                .Where(kvp => kvp.Value.ExpiresAt < now)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in expiredAccountLinkKeys)
+            {
+                _accountLinkSessions.TryRemove(key, out _);
+            }
+
             if (expiredKeys.Count > 0)
             {
                 _logger.LogInformation("Cleaned up {Count} expired Discord auth sessions.", expiredKeys.Count);
+            }
+
+            if (expiredAccountLinkKeys.Count > 0)
+            {
+                _logger.LogInformation("Cleaned up {Count} expired Discord account link sessions.", expiredAccountLinkKeys.Count);
             }
         }
 
@@ -113,7 +162,10 @@ namespace JellyfinDiscordAuth.Services
         {
             _cleanupTimer?.Dispose();
             _sessions.Clear();
+            _accountLinkSessions.Clear();
             return Task.CompletedTask;
         }
+
+        private sealed record AccountLinkSession(Guid UserId, DateTimeOffset ExpiresAt);
     }
 }
