@@ -1,5 +1,7 @@
 # Jellyfin Discord Authentication Plugin
 
+The original plugin is from EvenTrow (https://github.com/EvanTrow/Jellyfin-Discord-Auth), show some love as this wouldn't exist without them.
+
 This plugin lets users sign in to Jellyfin using their Discord account and syncs access based on Discord server roles.
 
 Plugin repository manifest URL:
