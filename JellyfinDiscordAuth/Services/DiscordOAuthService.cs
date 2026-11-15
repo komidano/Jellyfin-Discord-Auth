@@ -150,6 +150,7 @@ namespace JellyfinDiscordAuth.Services
             _logger.LogInformation("Discord user data received for {Username}.", username);
 
             // Match or create a Jellyfin user
+            RemoveOrphanedDiscordLinks(userData.Id);
             var savedDiscordUser = Config.DiscordUserData?.FirstOrDefault(x => x.Value.Id == userData.Id) ?? default;
             User? user = savedDiscordUser.Key == Guid.Empty
                 ? null
@@ -157,7 +158,8 @@ namespace JellyfinDiscordAuth.Services
 
             if (savedDiscordUser.Key != Guid.Empty && user == null)
             {
-                return (false, "The Jellyfin account linked to this Discord account no longer exists.", true);
+                RemoveOrphanedDiscordLinks(userData.Id);
+                savedDiscordUser = default;
             }
 
             if (user == null)
@@ -318,6 +320,7 @@ namespace JellyfinDiscordAuth.Services
                 return (false, identity.Error ?? "Failed to retrieve Discord user information.", true);
             }
 
+            RemoveOrphanedDiscordLinks(userData.Id);
             var existingDiscordLink = Config.DiscordUserData!.FirstOrDefault(
                 pair => string.Equals(pair.Value.Id, userData.Id, StringComparison.Ordinal));
             if (existingDiscordLink.Key != Guid.Empty && existingDiscordLink.Key != userId.Value)
@@ -341,6 +344,34 @@ namespace JellyfinDiscordAuth.Services
 
             _logger.LogInformation("Linked Discord account to Jellyfin user {UserId}.", userId.Value);
             return (true, userId.Value.ToString(), false);
+        }
+
+        private void RemoveOrphanedDiscordLinks(string discordUserId)
+        {
+            var discordUserData = Config.DiscordUserData;
+            if (discordUserData == null)
+            {
+                return;
+            }
+
+            var orphanedUserIds = discordUserData
+                .Where(pair => string.Equals(pair.Value.Id, discordUserId, StringComparison.Ordinal)
+                    && _userManager.GetUserById(pair.Key) == null)
+                .Select(pair => pair.Key)
+                .ToArray();
+
+            foreach (var userId in orphanedUserIds)
+            {
+                discordUserData.Remove(userId);
+            }
+
+            if (orphanedUserIds.Length > 0)
+            {
+                DiscordAuthPlugin.Instance?.SaveConfiguration();
+                _logger.LogInformation(
+                    "Removed {Count} stale Discord account link(s) for deleted Jellyfin user(s).",
+                    orphanedUserIds.Length);
+            }
         }
 
         /// <summary>

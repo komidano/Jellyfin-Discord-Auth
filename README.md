@@ -91,6 +91,7 @@ Behavior during login:
 - If the user only has `@everyone` (no other roles), login is denied.
 - New Jellyfin users are auto-created.
 - Existing linked users are updated and role/library access is synchronized.
+- If a linked Jellyfin account is deleted, its stale Discord link is cleared on the next login and a new user is created.
 - Existing Jellyfin accounts must be linked from their Profile page; Discord usernames are not used to match accounts.
 
 ## 7. Link an Existing Jellyfin Account
