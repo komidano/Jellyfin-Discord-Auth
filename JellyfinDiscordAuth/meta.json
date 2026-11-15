@@ -1,6 +1,6 @@
 {
 	"category": "Authentication",
-	"changelog": "Add Discord account linking and unlinking in the user profile.\r\nAdd a dashboard sidebar link to plugin settings.",
+	"changelog": "Fix authenticated account-link requests and profile layout.",
 	"description": "This plugin allows users to sign in with Discord.",
 	"guid": "359a7d2a-1c54-4e70-abbb-01bc73f098cf",
 	"imageUrl": "https://raw.githubusercontent.com/9p4/jellyfin-plugin-sso/main/img/logo.png",
@@ -9,5 +9,5 @@
 	"owner": "EvanTrow",
 	"targetAbi": "12.0.0",
 	"timestamp": "2026-11-15T00:39:10Z",
-	"version": "1.3.0.0"
+	"version": "1.3.0.1"
 }
