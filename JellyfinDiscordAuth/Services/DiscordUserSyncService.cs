@@ -58,6 +58,12 @@ namespace JellyfinDiscordAuth.Services
                 var user = _userManager.GetUserById(savedDiscordUser.Key);
                 if (user == null)
                 {
+                    if (Configuration.DiscordUserData?.Remove(savedDiscordUser.Key) == true)
+                    {
+                        DiscordAuthPlugin.Instance?.SaveConfiguration();
+                        _logger.LogInformation("Removed a stale Discord link for deleted Jellyfin user {UserId}.", savedDiscordUser.Key);
+                    }
+
                     return;
                 }
 
