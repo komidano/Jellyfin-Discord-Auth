@@ -24,7 +24,7 @@
             window.location.href = '/DiscordAuth/Login';
         });
 
-        loginForm.appendChild(btn);
+        loginForm.parentNode.insertBefore(btn, loginForm.nextSibling);
         return true;
     }
 
