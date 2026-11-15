@@ -103,13 +103,96 @@ namespace JellyfinDiscordAuth.Api
         }
 
         /// <summary>
+        /// Gets the Discord link status for the authenticated Jellyfin user.
+        /// </summary>
+        [Authorize]
+        [HttpGet("AccountLink")]
+        [Produces(MediaTypeNames.Application.Json)]
+        public IActionResult GetAccountLinkStatus()
+        {
+            if (!TryGetAuthenticatedUserId(out var userId))
+            {
+                return Unauthorized();
+            }
+
+            var status = _oauthService.GetAccountLinkStatus(userId);
+            if (status == null)
+            {
+                return NotFound();
+            }
+
+            return Ok(new
+            {
+                userId = status.Value.UserId,
+                isLinked = status.Value.IsLinked,
+                discordUsername = status.Value.DiscordUsername,
+                canUnlink = status.Value.CanUnlink
+            });
+        }
+
+        /// <summary>
+        /// Starts linking a Discord account to the authenticated Jellyfin user.
+        /// </summary>
+        [Authorize]
+        [HttpPost("AccountLink/Begin")]
+        [Produces(MediaTypeNames.Application.Json)]
+        public IActionResult BeginAccountLink()
+        {
+            if (!TryGetAuthenticatedUserId(out var userId))
+            {
+                return Unauthorized();
+            }
+
+            var config = DiscordAuthPlugin.Instance?.Configuration;
+            if (config == null || string.IsNullOrWhiteSpace(config.ClientId))
+            {
+                return Problem("Discord authentication is not configured.");
+            }
+
+            return Ok(new { url = _oauthService.BuildAccountLinkAuthorizeUrl(HttpContext, userId) });
+        }
+
+        /// <summary>
+        /// Removes the Discord link from the authenticated Jellyfin user.
+        /// </summary>
+        [Authorize]
+        [HttpPost("AccountLink/Unlink")]
+        [Produces(MediaTypeNames.Application.Json)]
+        public IActionResult UnlinkAccount()
+        {
+            if (!TryGetAuthenticatedUserId(out var userId))
+            {
+                return Unauthorized();
+            }
+
+            var (success, error) = _oauthService.UnlinkDiscordAccount(userId);
+            if (!success)
+            {
+                return BadRequest(new { message = error });
+            }
+
+            return Ok(new { success = true });
+        }
+
+        /// <summary>
         /// The Discord OAuth2 callback endpoint.
         /// </summary>
         [HttpGet("Callback")]
         [Produces(MediaTypeNames.Application.Json)]
         public async Task<IActionResult> Callback([FromQuery] string code, [FromQuery] string? state)
         {
-            var (success, result, isError) = await _oauthService.ProcessCallbackAsync(HttpContext, code, state).ConfigureAwait(false);
+            if (Request.Cookies.ContainsKey("discord_link_state"))
+            {
+                var (linkSuccess, linkResult, _) = await _oauthService.ProcessAccountLinkCallbackAsync(HttpContext, code, state).ConfigureAwait(false);
+                if (!linkSuccess)
+                {
+                    return Content(HtmlError(linkResult), MediaTypeNames.Text.Html);
+                }
+
+                return Redirect($"{Request.PathBase}/web/index.html#!/userprofile?userId={Uri.EscapeDataString(linkResult)}");
+            }
+
+            var (success, result, _) = await _oauthService.ProcessCallbackAsync(HttpContext, code, state).ConfigureAwait(false);
 
             if (!success)
             {
@@ -184,6 +267,11 @@ namespace JellyfinDiscordAuth.Api
                 serverId = session.ServerId,
                 username = session.Username
             });
+        }
+
+        private bool TryGetAuthenticatedUserId(out Guid userId)
+        {
+            return Guid.TryParse(User.FindFirst("Jellyfin-UserId")?.Value, out userId);
         }
 
         private static string HtmlError(string message)

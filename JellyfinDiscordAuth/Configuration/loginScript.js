@@ -28,8 +28,188 @@
         return true;
     }
 
+    function getCurrentProfileUserId() {
+        var hashQuery = window.location.hash.split('?')[1];
+        return hashQuery ? new URLSearchParams(hashQuery).get('userId') : null;
+    }
+
+    function getAuthHeaders() {
+        var apiClient = window.ApiClient;
+        var token = apiClient && typeof apiClient.accessToken === 'function'
+            ? apiClient.accessToken()
+            : null;
+
+        if (!token) {
+            throw new Error('Unable to access the Jellyfin authentication token.');
+        }
+
+        return {
+            'X-Emby-Token': token,
+            'Content-Type': 'application/json'
+        };
+    }
+
+    function tryInjectAccountLink() {
+        var profilePage = document.querySelector('#userProfilePage');
+        var apiClient = window.ApiClient;
+        if (!profilePage) {
+            return;
+        }
+
+        var existingSection = document.getElementById('discordAccountLink');
+        if (!apiClient || typeof apiClient.getCurrentUserId !== 'function') {
+            if (existingSection) {
+                existingSection.remove();
+            }
+            return;
+        }
+
+        var profileUserId = getCurrentProfileUserId();
+        var currentUserId = apiClient.getCurrentUserId();
+        if (!profileUserId || !currentUserId || profileUserId.toLowerCase() !== currentUserId.toLowerCase()) {
+            if (existingSection) {
+                existingSection.remove();
+            }
+            return;
+        }
+
+        if (existingSection) {
+            return;
+        }
+
+        var section = document.createElement('section');
+        section.id = 'discordAccountLink';
+        section.className = 'verticalSection';
+        section.innerHTML = '<h2 class="sectionTitle">Discord account</h2>' +
+            '<div class="fieldDescription" id="discordAccountLinkStatus">Loading link status...</div>' +
+            '<div class="sectionTitleContainer" style="margin-top:1em">' +
+                '<button type="button" class="raised button-submit emby-button" id="discordAccountLinkAction"></button>' +
+            '</div>';
+
+        var passwordForm = profilePage.querySelector('#userPasswordForm, .userPasswordForm');
+        if (passwordForm && passwordForm.parentNode) {
+            passwordForm.parentNode.insertBefore(section, passwordForm);
+        } else {
+            profilePage.appendChild(section);
+        }
+
+        var status = section.querySelector('#discordAccountLinkStatus');
+        var action = section.querySelector('#discordAccountLinkAction');
+
+        function setFailure(message, error) {
+            if (error) {
+                console.error('Discord account linking request failed.', error);
+            }
+            status.textContent = message;
+        }
+
+        function refreshStatus() {
+            status.textContent = 'Loading link status...';
+            action.hidden = true;
+            fetch('/DiscordAuth/AccountLink', {
+                method: 'GET',
+                headers: getAuthHeaders(),
+                credentials: 'same-origin'
+            }).then(function (response) {
+                return response.json().then(function (data) {
+                    if (!response.ok) {
+                        throw new Error(data.message || 'Unable to load Discord link status.');
+                    }
+                    return data;
+                });
+            }).then(function (data) {
+                action.hidden = false;
+                if (data.isLinked) {
+                    status.textContent = 'Linked to ' + (data.discordUsername || 'a Discord account') + '.';
+                    action.textContent = 'Unlink Discord';
+                    action.onclick = function () {
+                        if (!data.canUnlink) {
+                            return;
+                        }
+                        if (!window.confirm('Unlink this Discord account? Current Jellyfin permissions will not change.')) {
+                            return;
+                        }
+                        action.disabled = true;
+                        var unlinkHeaders;
+                        try {
+                            unlinkHeaders = getAuthHeaders();
+                        } catch (error) {
+                            action.disabled = false;
+                            setFailure(error.message || 'Unable to unlink Discord.', error);
+                            return;
+                        }
+                        fetch('/DiscordAuth/AccountLink/Unlink', {
+                            method: 'POST',
+                            headers: unlinkHeaders,
+                            credentials: 'same-origin'
+                        }).then(function (response) {
+                            return response.json().then(function (result) {
+                                if (!response.ok) {
+                                    throw new Error(result.message || 'Unable to unlink Discord.');
+                                }
+                            });
+                        }).then(refreshStatus).catch(function (error) {
+                            action.disabled = false;
+                            setFailure(error.message || 'Unable to unlink Discord.', error);
+                        });
+                    };
+                    action.disabled = !data.canUnlink;
+                    if (!data.canUnlink) {
+                        status.textContent += ' Add another sign-in method before unlinking this Discord-only account.';
+                    }
+                } else {
+                    status.textContent = 'No Discord account linked.';
+                    action.textContent = 'Link Discord';
+                    action.disabled = false;
+                    action.onclick = function () {
+                        action.disabled = true;
+                        var linkHeaders;
+                        try {
+                            linkHeaders = getAuthHeaders();
+                        } catch (error) {
+                            action.disabled = false;
+                            setFailure(error.message || 'Unable to start Discord linking.', error);
+                            return;
+                        }
+                        fetch('/DiscordAuth/AccountLink/Begin', {
+                            method: 'POST',
+                            headers: linkHeaders,
+                            credentials: 'same-origin'
+                        }).then(function (response) {
+                            return response.json().then(function (result) {
+                                if (!response.ok) {
+                                    throw new Error(result.message || 'Unable to start Discord linking.');
+                                }
+                                if (!result.url) {
+                                    throw new Error('The server did not return a Discord authorization URL.');
+                                }
+                                return result;
+                            });
+                        }).then(function (result) {
+                            window.location.assign(result.url);
+                        }).catch(function (error) {
+                            action.disabled = false;
+                            setFailure(error.message || 'Unable to start Discord linking.', error);
+                        });
+                    };
+                }
+            }).catch(function (error) {
+                action.hidden = true;
+                setFailure(error.message || 'Unable to load Discord link status.', error);
+            });
+        }
+
+        try {
+            refreshStatus();
+        } catch (error) {
+            action.hidden = true;
+            setFailure(error.message || 'Unable to load Discord link status.', error);
+        }
+    }
+
     var observer = new MutationObserver(function () {
         tryInjectButton();
+        tryInjectAccountLink();
     });
 
     observer.observe(document.body || document.documentElement, {
@@ -38,7 +218,9 @@
     });
 
     tryInjectButton();
+    tryInjectAccountLink();
     document.addEventListener('viewshow', function () {
         setTimeout(tryInjectButton, 100);
+        setTimeout(tryInjectAccountLink, 100);
     });
 })();

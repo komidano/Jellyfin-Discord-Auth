@@ -50,16 +50,18 @@ namespace JellyfinDiscordAuth.Services
             try
             {
                 var savedDiscordUser = Configuration.DiscordUserData?.FirstOrDefault(x => x.Value.Id == discordUser.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)) ?? default;
+                if (savedDiscordUser.Key == Guid.Empty)
+                {
+                    return;
+                }
 
-                var discordUserRoles = discordUser.Roles.Where(r => !r.IsEveryone);
-                User? user = savedDiscordUser.Key.ToString() == "00000000-0000-0000-0000-000000000000"
-                    ? _userManager.GetUserByName(discordUser.Username)
-                    : _userManager.GetUserById(savedDiscordUser.Key) ?? _userManager.GetUserByName(discordUser.Username);
-
+                var user = _userManager.GetUserById(savedDiscordUser.Key);
                 if (user == null)
                 {
                     return;
                 }
+
+                var discordUserRoles = discordUser.Roles.Where(r => !r.IsEveryone);
 
                 _logger.LogInformation("{Username} ({UserId}) updated.", discordUser.Username, discordUser.Id);
 

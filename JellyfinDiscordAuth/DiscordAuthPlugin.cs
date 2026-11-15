@@ -54,6 +54,9 @@ namespace JellyfinDiscordAuth
                 {
                     Name = Name,
                     EmbeddedResourcePath = $"{GetType().Namespace}.Configuration.configPage.html",
+                    DisplayName = "Discord Auth",
+                    EnableInMainMenu = true,
+                    MenuIcon = "link",
                 },
             ];
         }
