@@ -33,20 +33,28 @@
         return hashQuery ? new URLSearchParams(hashQuery).get('userId') : null;
     }
 
-    function getAuthHeaders() {
+    function getAccountLinkStatus() {
         var apiClient = window.ApiClient;
-        var token = apiClient && typeof apiClient.accessToken === 'function'
-            ? apiClient.accessToken()
-            : null;
-
-        if (!token) {
-            throw new Error('Unable to access the Jellyfin authentication token.');
+        if (!apiClient || typeof apiClient.getJSON !== 'function' || typeof apiClient.getUrl !== 'function') {
+            throw new Error('The Jellyfin API client is not available.');
         }
 
-        return {
-            'X-Emby-Token': token,
-            'Content-Type': 'application/json'
-        };
+        return apiClient.getJSON(apiClient.getUrl('DiscordAuth/AccountLink'));
+    }
+
+    function postAccountLinkAction(path) {
+        return Promise.resolve().then(function () {
+            var apiClient = window.ApiClient;
+            if (!apiClient || typeof apiClient.ajax !== 'function' || typeof apiClient.getUrl !== 'function') {
+                throw new Error('The Jellyfin API client is not available.');
+            }
+
+            return apiClient.ajax({
+                type: 'POST',
+                url: apiClient.getUrl(path),
+                dataType: 'json'
+            });
+        });
     }
 
     function tryInjectAccountLink() {
@@ -80,15 +88,19 @@
         var section = document.createElement('section');
         section.id = 'discordAccountLink';
         section.className = 'verticalSection';
+        section.style.cssText = 'max-width:800px;width:100%;margin:1.8em auto;padding:0 1em;box-sizing:border-box';
         section.innerHTML = '<h2 class="sectionTitle">Discord account</h2>' +
             '<div class="fieldDescription" id="discordAccountLinkStatus">Loading link status...</div>' +
             '<div class="sectionTitleContainer" style="margin-top:1em">' +
                 '<button type="button" class="raised button-submit emby-button" id="discordAccountLinkAction"></button>' +
             '</div>';
 
+        var profileContent = profilePage.querySelector('.padded-left.padded-right.padded-bottom-page');
         var passwordForm = profilePage.querySelector('#userPasswordForm, .userPasswordForm');
         if (passwordForm && passwordForm.parentNode) {
             passwordForm.parentNode.insertBefore(section, passwordForm);
+        } else if (profileContent) {
+            profileContent.appendChild(section);
         } else {
             profilePage.appendChild(section);
         }
@@ -103,21 +115,20 @@
             status.textContent = message;
         }
 
+        function getRequestErrorMessage(error, fallback) {
+            if (error && error.message) {
+                return error.message;
+            }
+            if (error && error.status) {
+                return fallback + ' (HTTP ' + error.status + ').';
+            }
+            return fallback;
+        }
+
         function refreshStatus() {
             status.textContent = 'Loading link status...';
             action.hidden = true;
-            fetch('/DiscordAuth/AccountLink', {
-                method: 'GET',
-                headers: getAuthHeaders(),
-                credentials: 'same-origin'
-            }).then(function (response) {
-                return response.json().then(function (data) {
-                    if (!response.ok) {
-                        throw new Error(data.message || 'Unable to load Discord link status.');
-                    }
-                    return data;
-                });
-            }).then(function (data) {
+            getAccountLinkStatus().then(function (data) {
                 action.hidden = false;
                 if (data.isLinked) {
                     status.textContent = 'Linked to ' + (data.discordUsername || 'a Discord account') + '.';
@@ -130,27 +141,9 @@
                             return;
                         }
                         action.disabled = true;
-                        var unlinkHeaders;
-                        try {
-                            unlinkHeaders = getAuthHeaders();
-                        } catch (error) {
+                        postAccountLinkAction('DiscordAuth/AccountLink/Unlink').then(refreshStatus).catch(function (error) {
                             action.disabled = false;
-                            setFailure(error.message || 'Unable to unlink Discord.', error);
-                            return;
-                        }
-                        fetch('/DiscordAuth/AccountLink/Unlink', {
-                            method: 'POST',
-                            headers: unlinkHeaders,
-                            credentials: 'same-origin'
-                        }).then(function (response) {
-                            return response.json().then(function (result) {
-                                if (!response.ok) {
-                                    throw new Error(result.message || 'Unable to unlink Discord.');
-                                }
-                            });
-                        }).then(refreshStatus).catch(function (error) {
-                            action.disabled = false;
-                            setFailure(error.message || 'Unable to unlink Discord.', error);
+                            setFailure(getRequestErrorMessage(error, 'Unable to unlink Discord.'), error);
                         });
                     };
                     action.disabled = !data.canUnlink;
@@ -163,39 +156,20 @@
                     action.disabled = false;
                     action.onclick = function () {
                         action.disabled = true;
-                        var linkHeaders;
-                        try {
-                            linkHeaders = getAuthHeaders();
-                        } catch (error) {
-                            action.disabled = false;
-                            setFailure(error.message || 'Unable to start Discord linking.', error);
-                            return;
-                        }
-                        fetch('/DiscordAuth/AccountLink/Begin', {
-                            method: 'POST',
-                            headers: linkHeaders,
-                            credentials: 'same-origin'
-                        }).then(function (response) {
-                            return response.json().then(function (result) {
-                                if (!response.ok) {
-                                    throw new Error(result.message || 'Unable to start Discord linking.');
-                                }
-                                if (!result.url) {
-                                    throw new Error('The server did not return a Discord authorization URL.');
-                                }
-                                return result;
-                            });
-                        }).then(function (result) {
+                        postAccountLinkAction('DiscordAuth/AccountLink/Begin').then(function (result) {
+                            if (!result.url) {
+                                throw new Error('The server did not return a Discord authorization URL.');
+                            }
                             window.location.assign(result.url);
                         }).catch(function (error) {
                             action.disabled = false;
-                            setFailure(error.message || 'Unable to start Discord linking.', error);
+                            setFailure(getRequestErrorMessage(error, 'Unable to start Discord linking.'), error);
                         });
                     };
                 }
             }).catch(function (error) {
                 action.hidden = true;
-                setFailure(error.message || 'Unable to load Discord link status.', error);
+                setFailure(getRequestErrorMessage(error, 'Unable to load Discord link status.'), error);
             });
         }
 
@@ -203,7 +177,7 @@
             refreshStatus();
         } catch (error) {
             action.hidden = true;
-            setFailure(error.message || 'Unable to load Discord link status.', error);
+            setFailure(getRequestErrorMessage(error, 'Unable to load Discord link status.'), error);
         }
     }
 
